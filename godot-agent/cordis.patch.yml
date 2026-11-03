@@ -1,0 +1,35 @@
+# dsh-godot bundle patch — inserts one Host plugin row that registers the six
+# `godot_*` model-facing tools (status, project_init, check, run, bridge, stop).
+#
+# Config keys on the `dsh-godot` row below (all optional; the plugin merges them
+# over its own defaults, so unknown keys are tolerated):
+#
+#   enginePath        (string, default '')
+#       Godot executable or a folder containing one. A folder prefers its
+#       `*_console.exe`. When empty the plugin discovers the engine in this
+#       order: `enginePath`, `$GODOT_BIN`, `godot`/`godot4`/`Godot` on PATH,
+#       then a bounded scan of common install roots (D:\Software\Godot*,
+#       C:\Program Files\Godot*, %LOCALAPPDATA%\Programs\Godot*, D:\Godot*,
+#       C:\Godot*).
+#
+#   projectRoot       (string, default '')
+#       Default project directory. `godot_status` reports it and every tool
+#       that takes a `project` argument still accepts an explicit override.
+#       When empty `godot_status` falls back to the Harness process cwd.
+#
+#   defaultTimeoutMs  (number, default 20000)
+#       Timeout for non-keepAlive `godot_run` invocations and one-shot
+#       import/check passes (per process).
+#
+# Example of setting the engine explicitly:
+#
+#   - id: dsh-godot
+#     name: '@local/dsh-godot'
+#     config:
+#       enginePath: 'D:\Software\Godot_v4.7.2-stable_win64.exe\Godot_v4.7.2-stable_win64_console.exe'
+#       projectRoot: 'D:\games\my-godot-game'
+#       defaultTimeoutMs: 20000
+- insert:
+    - id: dsh-godot
+      name: '@local/dsh-godot'
+      config: {}

@@ -1,0 +1,25 @@
+; BridgeDemo — verification project for the dsh-godot plugin.
+; Run windowed:  godot --path demo
+; Run headless:  godot --headless --path demo --quit-after 60
+; Run tests:     godot --headless --path demo -- --test
+config_version=5
+
+[application]
+
+config/name="BridgeDemo"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7")
+
+[autoload]
+
+Bridge="*res://addons/dsh_bridge/dsh_bridge.gd"
+HeadlessTest="*res://tests/headless_test.gd"
+
+[display]
+
+window/size/viewport_width=800
+window/size/viewport_height=600
+
+[physics]
+
+common/physics_ticks_per_second=60

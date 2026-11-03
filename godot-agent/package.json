@@ -1,0 +1,30 @@
+{
+  "name": "@local/dsh-godot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Godot 4 agent tools for DeepSeek Harness: engine discovery, project scaffolding, GDScript checks, headless runs, and a live runtime bridge.",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "src",
+    "templates",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node --test --test-isolation=none \"test/*.test.mjs\""
+  }
+}

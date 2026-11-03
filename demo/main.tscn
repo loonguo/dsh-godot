@@ -1,0 +1,45 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://main.gd" id="1"]
+[ext_resource type="PackedScene" path="res://player.tscn" id="2"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1")
+
+[node name="Background" type="ColorRect" parent="."]
+offset_right = 800.0
+offset_bottom = 600.0
+color = Color(0.07, 0.08, 0.11, 1)
+mouse_filter = 2
+
+[node name="Coins" type="Node2D" parent="."]
+
+[node name="Enemies" type="Node2D" parent="."]
+
+[node name="Player" parent="." instance=ExtResource("2")]
+position = Vector2(400, 520)
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="Status" type="Label" parent="HUD"]
+offset_left = 16.0
+offset_top = 12.0
+offset_right = 520.0
+offset_bottom = 44.0
+text = "Score: 0  Lives: 3"
+
+[node name="GameOver" type="Label" parent="HUD"]
+visible = false
+offset_left = 0.0
+offset_top = 260.0
+offset_right = 800.0
+offset_bottom = 320.0
+text = "GAME OVER - press R to restart"
+horizontal_alignment = 1
+
+[node name="Hint" type="Label" parent="HUD"]
+offset_left = 16.0
+offset_top = 560.0
+offset_right = 790.0
+offset_bottom = 592.0
+text = "Arrows/WASD: move. Yellow diamonds: +1 score. Red squares: avoid."

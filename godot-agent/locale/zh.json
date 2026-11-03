@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Godot 智能体桥接",
+    "description": "让智能体创建 Godot 项目、校验 GDScript、以无头模式运行与调试游戏，并通过本机回环桥接操作运行中的游戏。"
+  }
+}

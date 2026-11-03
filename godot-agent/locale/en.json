@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Godot Agent Bridge",
+    "description": "Lets the agent create Godot projects, check GDScript, run and debug games headless, and drive a running game over a loopback bridge."
+  }
+}

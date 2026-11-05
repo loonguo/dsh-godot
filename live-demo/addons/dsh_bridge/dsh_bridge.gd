@@ -50,6 +50,8 @@ var _quit_code := 0
 
 
 func _ready() -> void:
+	# Keep serving bridge commands while the game is paused (toolbar pause button).
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	var parsed := _parse_bridge_arg(OS.get_cmdline_user_args())
 	if parsed.is_empty():
 		# No bridge requested: stay completely inert.
@@ -212,7 +214,9 @@ func _handle_line(line: String) -> void:
 
 	match cmd:
 		"ping":
-			_reply_ok(id, {"pong": true, "scene": _current_scene_path()})
+			_reply_ok(id, {"pong": true, "scene": _current_scene_path(), "paused": get_tree().paused})
+		"pause":
+			_cmd_pause(id, args)
 		"tree":
 			_cmd_tree(id, args)
 		"node":
@@ -609,6 +613,17 @@ func _absolute_path(path: String) -> String:
 	if path.is_absolute_path():
 		return path
 	return ProjectSettings.globalize_path("res://" + path)
+
+
+## Pause or resume the whole scene tree. This node runs with PROCESS_MODE_ALWAYS,
+## so it keeps serving commands (and `frames`) while the game is paused.
+func _cmd_pause(id: int, args: Dictionary) -> void:
+	var tree := get_tree()
+	if tree == null:
+		_reply_error(id, "pause failed: no running scene tree")
+		return
+	tree.paused = bool(args.get("paused", true))
+	_reply_ok(id, {"paused": tree.paused})
 
 
 func _cmd_quit(id: int, args: Dictionary) -> void:

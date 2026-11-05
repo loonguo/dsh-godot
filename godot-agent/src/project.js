@@ -242,6 +242,46 @@ function ensureBridgeAutoload(projectFile) {
   fs.writeFileSync(projectFile, text, 'utf8');
 }
 
+/**
+ * Make sure an existing project carries the current dsh bridge autoload: refresh
+ * `addons/dsh_bridge/dsh_bridge.gd` from the bundled template (only when the bytes
+ * differ) and add the `[autoload]` row when it is missing.
+ *
+ * Used by the toolbar's one-click play, so a project scaffolded by an older
+ * bundle keeps working after the bridge gains commands (e.g. `pause`).
+ *
+ * @param {string} project directory or `project.godot` path
+ * @returns {{ directory: string, bridgeWritten: boolean, autoloadAdded: boolean, project: {name: string, mainScene: string, valid: boolean} }}
+ */
+export function ensureBridgeInProject(project) {
+  const info = resolveProject(project);
+  const directory = info.dir;
+  const source = path.join(TEMPLATES_DIR, BRIDGE_SOURCE_REL);
+  if (!fs.existsSync(source)) {
+    throw new Error(`the dsh-godot package is missing "${source}"; reinstall the bundle.`);
+  }
+  const content = fs.readFileSync(source, 'utf8');
+  const destination = path.join(directory, BRIDGE_DEST_REL);
+  let bridgeWritten = false;
+  let existing = null;
+  try {
+    existing = fs.readFileSync(destination, 'utf8');
+  } catch {
+    existing = null;
+  }
+  if (existing !== content) {
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.writeFileSync(destination, content, 'utf8');
+    bridgeWritten = true;
+  }
+  const projectFile = path.join(directory, 'project.godot');
+  const before = fs.readFileSync(projectFile, 'utf8');
+  ensureBridgeAutoload(projectFile);
+  const autoloadAdded = fs.readFileSync(projectFile, 'utf8') !== before;
+  const projectInfo = readProjectFile(projectFile);
+  return { directory, bridgeWritten, autoloadAdded, project: projectInfo };
+}
+
 /** Pick the template root: `templates/<template>/` when present, else `templates/`. */
 function pickTemplateRoot(template) {
   if (template !== undefined && template !== null) {

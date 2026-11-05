@@ -22,8 +22,9 @@
 | `godot_bridge` | 对运行中的游戏发一条桥接命令并拿回 JSON 结果 | `session`、`command`、`args` |
 | `godot_stop` | 结束会话并清理进程（不带 session 则全停） | `session` |
 
-`godot_bridge` 支持：`ping`、`tree`、`node`、`node_set`、`node_call`、`action`、
-`frames`、`screenshot`、`quit`。
+`godot_bridge` 支持：`ping`、`tree`、`node`、`node_set`、`node_call`、`action`、`pause`、
+`frames`、`screenshot`、`quit`。`pause` 传 `{"paused": true|false}`，冻结/恢复整棵场景树
+（`get_tree().paused`），桥接节点自身用 `PROCESS_MODE_ALWAYS` 保持响应，`ping` 会返回当前暂停状态。
 
 工作流示例：
 
@@ -38,6 +39,27 @@ godot_bridge {session: "g1", command: "action",   args: {action: "ui_right", pre
 godot_bridge {session: "g1", command: "screenshot"}     # 窗口模式才有图
 godot_stop {session: "g1"}
 ```
+
+## 1.5 工具栏：一键运行 / 暂停游戏（不必再打开 Godot）
+
+DSH 会话标题栏右侧（`conversation.session.header.utilities`）会多出一个小控件：
+
+| 控件 | 行为 |
+| --- | --- |
+| ▶ / ⏸ 切换按钮 | 未运行时**启动游戏窗口**；运行中点击**暂停**（冻结整个场景树）；暂停中点击**继续** |
+| ■ 停止 | 结束游戏进程并关闭窗口 |
+| 状态点 | 灰=未运行、绿=运行中、黄=已暂停、红=出错；悬停显示状态、项目名与工程路径 |
+
+- 启动的工程按以下顺序解析：会话工作目录下**最近修改**的 `project.godot` → 插件配置
+  `projectRoot` → 报错并在悬停提示里说明。把游戏工程目录作为会话目录打开，按钮就能直接跑它。
+- 启动前会自动确保工程里有最新的 `addons/dsh_bridge/dsh_bridge.gd` 和 `[autoload]` 行
+  （只补不覆盖用户其它内容），所以老工程也能直接用暂停功能。
+- 工具栏和 agent 操作的是**同一个游戏会话**：按钮启动后，agent 用 `godot_status` 能看到它、
+  用 `godot_bridge pause` 也能暂停它，反之亦然。
+- 传输是本机回环 HTTP：`GET /dsh-godot/state?sessionId=…`、`POST /dsh-godot/control`（JSON，
+  `action: start|pause|resume|toggle|stop`）。路由只接受同源请求，且服务绑定在 127.0.0.1；
+  本机其它进程仍可访问，因此它只用于本机受信环境。
+- 客户端代码（`client.js`）由页面在加载时拉取：**更新插件后需要刷新一次页面**才会出现/更新按钮。
 
 ## 2. 真实会话实录（全部发生在本会话，非模拟）
 

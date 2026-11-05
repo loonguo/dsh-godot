@@ -111,7 +111,17 @@ test('the floating panel is fixed-positioned, draggable and keeps the run/stop c
   assert.ok(overlay);
   assert.ok(React, 'react runtime is required by the module');
 
-  const rendered = overlay.component({});
+  // Hidden until a workspace with a Godot project is known.
+  assert.equal(overlay.component({}), null, 'the panel must stay hidden without workspace information');
+  assert.equal(
+    overlay.component({ initialState: { running: false, workspace: { available: false, projectName: null } } }),
+    null,
+    'the panel must stay hidden when the workspace has no Godot project',
+  );
+
+  const rendered = overlay.component({
+    initialState: { running: false, workspace: { available: true, projectName: 'Star Catcher' } },
+  });
   assert.equal(rendered.type, 'div');
   assert.equal(rendered.props.role, 'group');
   assert.equal(rendered.props.style.position, 'fixed', 'the panel must float above the app');
@@ -126,6 +136,15 @@ test('the floating panel is fixed-positioned, draggable and keeps the run/stop c
   assert.equal(typeof buttons[0].props.onClick, 'function');
   assert.equal(buttons[0].props.disabled, false);
   assert.equal(buttons[1].props.disabled, true, 'stop is disabled while no game runs');
+
+  // An idle panel names the workspace project so the run button is self-explanatory.
+  const label = rendered.children.find((child) => child && child.type === 'span' && child.props.style && child.props.style.overflow === 'hidden');
+  assert.ok(label, 'expected a status label');
+  assert.match(String(label.children[0]), /Star Catcher/);
+
+  // A running game keeps the panel visible even if the workspace check fails.
+  const running = overlay.component({ initialState: { running: true, workspace: { available: false } } });
+  assert.equal(running.type, 'div');
 });
 
 test('the session bridge records the conversation id for the overlay', () => {

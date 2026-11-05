@@ -211,10 +211,11 @@ window.__ModuleLoader__.load({
     }
 
     /** The movable floating panel itself. */
-    function GodotFloat() {
+    function GodotFloat(props) {
       const translate = GodotFloat.translate;
       const [position, setPosition] = React.useState(() => clampPosition(readStoredPosition() || defaultPosition()));
-      const [state, setState] = React.useState(null);
+      // `initialState` is a test seam: the slot passes no props in the browser.
+      const [state, setState] = React.useState(props && props.initialState ? props.initialState : null);
       const [error, setError] = React.useState('');
       const [busy, setBusy] = React.useState(false);
 
@@ -290,9 +291,15 @@ window.__ModuleLoader__.load({
 
       const running = Boolean(state && state.running);
       const paused = Boolean(state && state.paused);
+      // Only appear where the page can actually act: the session's workspace
+      // holds a Godot project. A running game stays visible so it can be paused
+      // or stopped even if the workspace changes underneath it.
+      const workspace = state && state.workspace ? state.workspace : null;
+      const available = Boolean(state && (state.running || (workspace && workspace.available === true)));
+      if (!available) return null;
       const toggleTitle = busy ? translate('busy') : !running ? translate('run') : paused ? translate('resume') : translate('pause');
       const statusText = busy ? translate('busy') : !running ? translate('idle') : paused ? translate('paused') : translate('running');
-      const projectText = state && state.project ? state.projectName || state.project : '';
+      const projectText = state && state.project ? state.projectName || state.project : workspace && workspace.projectName ? workspace.projectName : '';
       const detail = [statusText, projectText].filter((part) => part !== '').join(' · ');
       const tooltip = error
         ? `${translate('failed')}: ${error}`

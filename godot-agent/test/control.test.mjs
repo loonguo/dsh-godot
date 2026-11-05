@@ -111,6 +111,39 @@ test('controller starts, pauses, resumes and stops a real game', { skip, timeout
   }
 });
 
+test('state reports whether the session workspace holds a Godot project', { timeout: 60000 }, async () => {
+  const runtime = createRuntime({ enginePath: ENGINE });
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-godot-ws-'));
+  const emptyWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-godot-ws-empty-'));
+  const projectDir = path.join(workspace, 'game');
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectDir, 'project.godot'),
+    'config_version=5\n\n[application]\n\nconfig/name="WS Game"\nrun/main_scene="res://main.tscn"\n',
+    'utf8',
+  );
+  const controller = createController(runtime, {
+    resolveSessionDirectory: (sessionId) => (sessionId === 's-with' ? workspace : sessionId === 's-empty' ? emptyWorkspace : undefined),
+  });
+  try {
+    const withProject = controller.state('s-with');
+    assert.equal(withProject.workspace.available, true, 'a session workspace containing a project must be available');
+    assert.equal(path.resolve(withProject.workspace.project), path.resolve(projectDir));
+    assert.equal(withProject.workspace.projectName, 'WS Game');
+    assert.deepEqual(withProject.workspace.candidates, ['game']);
+    assert.equal(path.resolve(withProject.workspace.directory), path.resolve(workspace));
+
+    assert.equal(controller.state('s-empty').workspace.available, false, 'a workspace without a project must be unavailable');
+    assert.equal(controller.state(undefined).workspace.available, false, 'no session means no workspace to check');
+    assert.equal(controller.state('unknown-session').workspace.available, false);
+  } finally {
+    controller.dispose();
+    runtime.dispose();
+    fs.rmSync(workspace, { recursive: true, force: true });
+    fs.rmSync(emptyWorkspace, { recursive: true, force: true });
+  }
+});
+
 test('controller rejects actions without a running game', { skip, timeout: 30000 }, async () => {
   const runtime = createRuntime({ enginePath: ENGINE });
   const controller = createController(runtime, {});

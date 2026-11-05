@@ -109,10 +109,66 @@ export function createController(runtime, { resolveSessionDirectory } = {}) {
     return runtime.engineCache;
   }
 
-  /** The raw state object sent to the UI and returned by `godot_play`. */
-  function state() {
+  /**
+   * What the page needs to decide whether the floating panel is relevant: the
+   * session's workspace directory and whether it (or a descendant) holds a
+   * Godot project. `available` gates the panel; the first candidate is what the
+   * run button would launch.
+   *
+   * @param {string} [sessionId] Session id reported by the page
+   * @returns {{ directory: string|null, available: boolean, project: string|null, projectName: string|null, candidates: string[] }}
+   */
+  function sessionWorkspace(sessionId) {
+    if (typeof sessionId !== 'string' || sessionId.length === 0 || typeof resolveSessionDirectory !== 'function') {
+      return { directory: null, available: false, project: null, projectName: null, candidates: [] };
+    }
+    /** @type {string|undefined} */
+    let directory;
+    try {
+      directory = resolveSessionDirectory(sessionId);
+    } catch {
+      directory = undefined;
+    }
+    if (typeof directory !== 'string' || directory.length === 0) {
+      return { directory: null, available: false, project: null, projectName: null, candidates: [] };
+    }
+    const absolute = path.resolve(directory);
+    const candidates = findProjects(absolute);
+    let projectName = null;
+    if (candidates.length > 0) {
+      try {
+        projectName = resolveProject(candidates[0]).name;
+      } catch {
+        projectName = path.basename(candidates[0]);
+      }
+    }
+    return {
+      directory: absolute,
+      available: candidates.length > 0,
+      project: candidates[0] ?? null,
+      projectName,
+      candidates: candidates.map((entry) => path.basename(entry)),
+    };
+  }
+
+  /**
+   * The raw state object sent to the UI and returned by `godot_play`.
+   * @param {string} [sessionId] Session id from the page; drives `workspace`
+   */
+  function state(sessionId) {
+    const workspace = sessionWorkspace(sessionId);
     if (current === null) {
-      return { running: false, paused: false, project: null, projectName: null, sessionId: null, pid: null, startedAt: null, bridge: null };
+      return {
+        running: false,
+        paused: false,
+        project: null,
+        projectName: null,
+        sessionId: null,
+        pid: null,
+        startedAt: null,
+        bridge: null,
+        workspace,
+      };
     }
     const alive = current.session.alive !== false;
     return {
@@ -124,6 +180,7 @@ export function createController(runtime, { resolveSessionDirectory } = {}) {
       pid: current.session.pid ?? null,
       startedAt: current.startedAt,
       bridge: current.bridge.attached ? 'attached' : 'detached',
+      workspace,
     };
   }
 
@@ -424,7 +481,7 @@ export function createControlHandler(controller) {
     try {
       if (request.method === 'GET' && url.pathname === '/dsh-godot/state') {
         const sessionId = url.searchParams.get('sessionId') ?? undefined;
-        sendJson(response, 200, { ok: true, state: controller.state(), sessionId: sessionId ?? null, platform: os.platform() });
+        sendJson(response, 200, { ok: true, state: controller.state(sessionId), sessionId: sessionId ?? null, platform: os.platform() });
         return;
       }
       if (request.method === 'POST' && url.pathname === '/dsh-godot/control') {

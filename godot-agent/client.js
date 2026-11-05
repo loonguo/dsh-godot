@@ -1,8 +1,15 @@
 /**
- * Client half of @local/dsh-godot: a run/pause button in the Session header.
+ * Client half of @local/dsh-godot: a movable floating run/pause panel.
  *
- * It renders one compact control in `conversation.session.header.utilities` and
- * talks to the package's own Host half over two loopback HTTP routes:
+ * It contributes two slot entries from this one module:
+ *  - `conversation.session.header.utilities` gets an invisible bridge that records
+ *    the Session id of the page's open conversation (the root-scoped overlay has
+ *    no session prop of its own).
+ *  - `shell.overlay` gets the visible panel: a small card the user can drag
+ *    anywhere over the app (position persisted in localStorage, double-click
+ *    resets it), with run/pause toggle, stop, status dot and the running project.
+ *
+ * It talks to the package's own Host half over two loopback HTTP routes:
  *   GET  /dsh-godot/state?sessionId=…
  *   POST /dsh-godot/control { action: start|pause|resume|toggle|stop, sessionId }
  *
@@ -15,6 +22,10 @@ window.__ModuleLoader__.load({
     const h = React.createElement;
 
     const NS = 'dsh-godot';
+    const POSITION_KEY = 'dsh-godot:float-position';
+    const PANEL_WIDTH = 244;
+    const PANEL_HEIGHT = 48;
+    const EDGE = 8;
 
     const DICTIONARIES = {
       en: {
@@ -25,10 +36,10 @@ window.__ModuleLoader__.load({
         running: 'Running',
         paused: 'Paused',
         idle: 'Not running',
-        starting: 'Starting…',
         busy: 'Working…',
         failed: 'Godot control failed',
         groupLabel: 'Godot game controls',
+        moveHint: 'Drag to move · double-click to reset position',
       },
       zh: {
         run: '运行游戏',
@@ -38,14 +49,61 @@ window.__ModuleLoader__.load({
         running: '运行中',
         paused: '已暂停',
         idle: '未运行',
-        starting: '启动中…',
         busy: '处理中…',
         failed: 'Godot 控制失败',
         groupLabel: 'Godot 游戏控制',
+        moveHint: '拖动移动 · 双击复位位置',
       },
     };
 
     const FALLBACK = DICTIONARIES.en;
+
+    /** Session id of the conversation the page currently shows; set by the bridge entry. */
+    let activeSessionId = null;
+
+    function readStoredPosition() {
+      try {
+        const raw = window.localStorage.getItem(POSITION_KEY);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw);
+        if (parsed && Number.isFinite(parsed.left) && Number.isFinite(parsed.top)) {
+          return { left: parsed.left, top: parsed.top };
+        }
+      } catch {
+        /* storage can be unavailable; fall through to the default */
+      }
+      return null;
+    }
+
+    function storePosition(position) {
+      try {
+        window.localStorage.setItem(POSITION_KEY, JSON.stringify(position));
+      } catch {
+        /* storage unavailable: the panel still drags, position just won't persist */
+      }
+    }
+
+    function viewport() {
+      if (typeof window === 'undefined') return { width: 1280, height: 800 };
+      return {
+        width: Number.isFinite(window.innerWidth) ? window.innerWidth : 1280,
+        height: Number.isFinite(window.innerHeight) ? window.innerHeight : 800,
+      };
+    }
+
+    function clampPosition(position) {
+      const { width, height } = viewport();
+      return {
+        left: Math.min(Math.max(position.left, EDGE), Math.max(EDGE, width - PANEL_WIDTH - EDGE)),
+        top: Math.min(Math.max(position.top, EDGE), Math.max(EDGE, height - PANEL_HEIGHT - EDGE)),
+      };
+    }
+
+    function defaultPosition() {
+      const { width } = viewport();
+      // Top-right, below the session header; clear of the composer at the bottom.
+      return clampPosition({ left: width - PANEL_WIDTH - 24, top: 72 });
+    }
 
     /**
      * Register the package dictionaries on the Client locale service and return
@@ -111,13 +169,17 @@ window.__ModuleLoader__.load({
       );
     }
 
-    const GROUP_STYLE = {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '4px',
-      padding: '0 2px',
-      flex: 'none',
-    };
+    function IconGrip() {
+      return h(
+        'svg',
+        { viewBox: '0 0 10 16', width: 10, height: 16, 'aria-hidden': true, focusable: false },
+        ...[4.5, 8, 11.5].flatMap((y) =>
+          [3, 7].map((x) => h('circle', { key: `${x}-${y}`, cx: x, cy: y, r: 1.1, fill: 'currentColor' })),
+        ),
+      );
+    }
+
+    const KEYFRAMES = '@keyframes dsh-godot-pulse{0%,100%{opacity:.35}50%{opacity:1}}';
 
     function buttonStyle(accent, disabled) {
       return {
@@ -135,25 +197,23 @@ window.__ModuleLoader__.load({
         opacity: disabled ? 0.45 : 1,
         lineHeight: 1,
         boxSizing: 'border-box',
-      };
-    }
-
-    function dotStyle(color, pulsing) {
-      return {
-        width: '6px',
-        height: '6px',
-        borderRadius: '50%',
-        background: color,
         flex: 'none',
-        animation: pulsing ? 'dsh-godot-pulse 1.2s ease-in-out infinite' : undefined,
       };
     }
 
-    const KEYFRAMES = '@keyframes dsh-godot-pulse{0%,100%{opacity:.35}50%{opacity:1}}';
+    /** Invisible entry in the Session header: records which conversation is open. */
+    function SessionBridge(props) {
+      const sessionId = props && props.sessionId;
+      React.useEffect(() => {
+        activeSessionId = typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : null;
+      }, [sessionId]);
+      return null;
+    }
 
-    function GodotRunner(props) {
-      const translate = props.translate;
-      const sessionId = props.sessionId;
+    /** The movable floating panel itself. */
+    function GodotFloat() {
+      const translate = GodotFloat.translate;
+      const [position, setPosition] = React.useState(() => clampPosition(readStoredPosition() || defaultPosition()));
       const [state, setState] = React.useState(null);
       const [error, setError] = React.useState('');
       const [busy, setBusy] = React.useState(false);
@@ -162,7 +222,7 @@ window.__ModuleLoader__.load({
         let cancelled = false;
         const refresh = async () => {
           try {
-            const next = await readState(sessionId);
+            const next = await readState(activeSessionId);
             if (!cancelled) setState(next);
           } catch (failure) {
             if (!cancelled) setError(String((failure && failure.message) || failure));
@@ -174,12 +234,51 @@ window.__ModuleLoader__.load({
           cancelled = true;
           clearInterval(timer);
         };
-      }, [sessionId]);
+      }, []);
+
+      // Keep the panel inside the window when the window shrinks.
+      React.useEffect(() => {
+        const onResize = () => setPosition((current) => clampPosition(current));
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+      }, []);
+
+      const startDrag = (event) => {
+        if (event.button !== undefined && event.button !== 0) return;
+        const target = event.target;
+        if (target && typeof target.closest === 'function' && target.closest('button')) return;
+        event.preventDefault();
+        const originX = event.clientX;
+        const originY = event.clientY;
+        const base = position;
+        let latest = base;
+        const onMove = (moveEvent) => {
+          latest = clampPosition({ left: base.left + (moveEvent.clientX - originX), top: base.top + (moveEvent.clientY - originY) });
+          setPosition(latest);
+        };
+        const onUp = () => {
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', onUp);
+          storePosition(latest);
+          document.body.style.userSelect = '';
+          document.body.style.cursor = '';
+        };
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp, { once: true });
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'grabbing';
+      };
+
+      const resetPosition = () => {
+        const next = defaultPosition();
+        setPosition(next);
+        storePosition(next);
+      };
 
       const act = async (action) => {
         setBusy(true);
         try {
-          const next = await sendControl({ action, sessionId });
+          const next = await sendControl({ action, sessionId: activeSessionId || undefined });
           setState(next);
           setError('');
         } catch (failure) {
@@ -193,9 +292,11 @@ window.__ModuleLoader__.load({
       const paused = Boolean(state && state.paused);
       const toggleTitle = busy ? translate('busy') : !running ? translate('run') : paused ? translate('resume') : translate('pause');
       const statusText = busy ? translate('busy') : !running ? translate('idle') : paused ? translate('paused') : translate('running');
-      const projectText = state && state.project ? `${state.projectName || ''} — ${state.project}` : '';
+      const projectText = state && state.project ? state.projectName || state.project : '';
       const detail = [statusText, projectText].filter((part) => part !== '').join(' · ');
-      const groupTitle = error ? `${translate('failed')}: ${error}` : detail;
+      const tooltip = error
+        ? `${translate('failed')}: ${error}`
+        : `${detail || translate('idle')}\n${translate('moveHint')}`;
       const dotColor = error
         ? 'var(--dsw-alias-state-error-primary)'
         : !running
@@ -204,11 +305,77 @@ window.__ModuleLoader__.load({
             ? 'var(--dsw-alias-state-warn-primary)'
             : 'var(--dsw-alias-state-success-primary)';
 
+      const panelStyle = {
+        position: 'fixed',
+        left: `${position.left}px`,
+        top: `${position.top}px`,
+        zIndex: 60,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        maxWidth: `${PANEL_WIDTH}px`,
+        boxSizing: 'border-box',
+        padding: '6px 8px',
+        borderRadius: '10px',
+        border: '1px solid var(--dsw-alias-border-l1)',
+        background: 'var(--dsw-alias-bg-overlay)',
+        color: 'var(--dsw-alias-label-primary)',
+        boxShadow: '0 6px 20px rgba(0, 0, 0, 0.16)',
+        pointerEvents: 'auto',
+        cursor: 'grab',
+        userSelect: 'none',
+        font: 'inherit',
+      };
+
+      const dragHandleStyle = {
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '12px',
+        height: '24px',
+        color: 'var(--dsw-alias-label-secondary)',
+        flex: 'none',
+      };
+
+      const labelStyle = {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '4px',
+        minWidth: 0,
+        flex: '1 1 auto',
+        fontSize: '12px',
+        lineHeight: 1.2,
+        color: 'var(--dsw-alias-label-secondary)',
+        overflow: 'hidden',
+        whiteSpace: 'nowrap',
+        textOverflow: 'ellipsis',
+      };
+
       return h(
         'div',
-        { role: 'group', 'aria-label': translate('groupLabel'), title: groupTitle, style: GROUP_STYLE },
+        {
+          role: 'group',
+          'aria-label': translate('groupLabel'),
+          title: tooltip,
+          style: panelStyle,
+          onPointerDown: startDrag,
+          onDoubleClick: resetPosition,
+        },
         h('style', { key: 'kf' }, KEYFRAMES),
-        h('span', { key: 'dot', style: dotStyle(dotColor, busy), 'aria-hidden': true }),
+        h('span', { key: 'grip', style: dragHandleStyle, 'aria-hidden': true }, h(IconGrip)),
+        h('span', {
+          key: 'dot',
+          style: {
+            width: '7px',
+            height: '7px',
+            borderRadius: '50%',
+            background: dotColor,
+            flex: 'none',
+            animation: busy ? 'dsh-godot-pulse 1.2s ease-in-out infinite' : undefined,
+          },
+          'aria-hidden': true,
+        }),
+        h('span', { key: 'label', style: labelStyle }, detail || translate('idle')),
         h(
           'button',
           {
@@ -242,10 +409,18 @@ window.__ModuleLoader__.load({
       inject: ['slots'],
       apply(ctx) {
         const translate = createTranslator(ctx);
+        GodotFloat.translate = translate;
+
+        // Root overlay: the draggable floating panel.
+        ctx.slots.inject('shell.overlay', () =>
+          ctx.slots.register({ name: 'shell.overlay', id: 'godot-float', order: 50, label: 'Godot' }, GodotFloat),
+        );
+
+        // Session header: invisible listener that tells the overlay which conversation is open.
         ctx.slots.inject('conversation.session.header.utilities', () =>
           ctx.slots.register(
-            { name: 'conversation.session.header.utilities', id: 'godot-runner', order: 20, label: 'Godot' },
-            (props) => h(GodotRunner, { translate, sessionId: props.sessionId }),
+            { name: 'conversation.session.header.utilities', id: 'godot-session-bridge', order: 0, label: 'Godot' },
+            SessionBridge,
           ),
         );
       },

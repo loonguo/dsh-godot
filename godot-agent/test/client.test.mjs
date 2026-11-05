@@ -3,8 +3,8 @@
  *
  * The browser loads client.js through `window.__ModuleLoader__`. This test
  * provides that loader plus a minimal React and Cordis context, so the module's
- * shape (id === package name, declared injects, slot registration, locale
- * dictionaries) is verified without a browser.
+ * shape is verified without a browser: the module id, the two slot entries, the
+ * movable floating panel's DOM contract and the locale dictionaries.
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -45,6 +45,30 @@ function loadClientModule() {
   return { id: captured.id, plugin: captured.factory(require), React };
 }
 
+/** A context that records every slot injection and registration. */
+function recordingContext() {
+  const record = { injectedKeys: [], registrations: [], locales: [] };
+  const ctx = {
+    get: (name) =>
+      name === 'locale'
+        ? {
+            register: (ns, locale, dict) => record.locales.push({ ns, locale, dict }),
+            bind: (ns) => (key) => `${ns}:${key}`,
+          }
+        : undefined,
+    slots: {
+      inject: (key, callback) => {
+        record.injectedKeys.push(key);
+        callback();
+      },
+      register: (options, component) => {
+        record.registrations.push({ options, component });
+      },
+    },
+  };
+  return { ctx, record };
+}
+
 test('client module id matches the package name the Host serves', () => {
   const { id } = loadClientModule();
   assert.equal(id, packageJson.name);
@@ -53,72 +77,63 @@ test('client module id matches the package name the Host serves', () => {
   assert.ok(packageJson.files.includes('client.js'), 'client.js must be published');
 });
 
-test('the toolbar registers the run/pause control in the session header utilities', () => {
+test('the floating panel registers in shell.overlay plus a session-id bridge', () => {
   const { plugin } = loadClientModule();
   assert.deepEqual([...plugin.inject], ['slots']);
 
-  const registered = { locales: [], injectKey: null, options: null, component: null };
-  const ctx = {
-    get: (name) =>
-      name === 'locale'
-        ? {
-            register: (ns, locale, dict) => registered.locales.push({ ns, locale, dict }),
-            bind: (ns) => (key) => `${ns}:${key}`,
-          }
-        : undefined,
-    slots: {
-      inject: (key, callback) => {
-        registered.injectKey = key;
-        callback();
-      },
-      register: (options, component) => {
-        registered.options = options;
-        registered.component = component;
-      },
-    },
-  };
+  const { ctx, record } = recordingContext();
   plugin.apply(ctx);
 
-  assert.equal(registered.injectKey, 'conversation.session.header.utilities');
-  assert.equal(registered.options.name, 'conversation.session.header.utilities');
-  assert.equal(registered.options.id, 'godot-runner');
-  assert.equal(registered.options.order, 20);
-  assert.equal(typeof registered.component, 'function');
+  assert.deepEqual([...record.injectedKeys].sort(), ['conversation.session.header.utilities', 'shell.overlay']);
+  const overlay = record.registrations.find((entry) => entry.options.name === 'shell.overlay');
+  const bridge = record.registrations.find((entry) => entry.options.name === 'conversation.session.header.utilities');
+  assert.ok(overlay, 'expected a shell.overlay registration (the movable panel)');
+  assert.ok(bridge, 'expected a session header bridge entry');
+  assert.equal(overlay.options.id, 'godot-float');
+  assert.equal(bridge.options.id, 'godot-session-bridge');
+  assert.equal(typeof overlay.component, 'function');
 
-  const locales = registered.locales.map((entry) => entry.locale);
+  const locales = record.locales.map((entry) => entry.locale);
   assert.deepEqual([...locales].sort(), ['en', 'zh']);
-  for (const entry of registered.locales) {
+  for (const entry of record.locales) {
     assert.equal(entry.ns, 'dsh-godot');
-    for (const key of ['run', 'pause', 'resume', 'stop', 'running', 'paused', 'idle', 'failed']) {
+    for (const key of ['run', 'pause', 'resume', 'stop', 'running', 'paused', 'idle', 'failed', 'moveHint']) {
       assert.equal(typeof entry.dict[key], 'string', `${entry.locale}.${key} must be a string`);
     }
   }
 });
 
-test('the toolbar component renders a toggle and a stop control from a session id', () => {
+test('the floating panel is fixed-positioned, draggable and keeps the run/stop controls', () => {
   const { plugin, React } = loadClientModule();
-  let component = null;
-  plugin.apply({
-    get: () => undefined,
-    slots: { inject: (key, callback) => callback(), register: (options, candidate) => (component = candidate) },
-  });
-  assert.ok(component);
-
-  // The registered factory renders the inner GodotRunner component.
-  const element = component({ sessionId: 'session-1' });
-  assert.equal(typeof element.type, 'function');
-  assert.equal(element.props.sessionId, 'session-1');
-
-  const rendered = element.type({ translate: (key) => key, sessionId: 'session-1' });
-  assert.equal(rendered.type, 'div');
-  assert.equal(rendered.props.role, 'group');
-  const buttons = rendered.children.filter((child) => child && child.type === 'button');
-  assert.equal(buttons.length, 2, 'expected a run/pause toggle and a stop button');
+  const { ctx, record } = recordingContext();
+  plugin.apply(ctx);
+  const overlay = record.registrations.find((entry) => entry.options.name === 'shell.overlay');
+  assert.ok(overlay);
   assert.ok(React, 'react runtime is required by the module');
 
-  const toggle = buttons[0];
-  assert.equal(typeof toggle.props.onClick, 'function');
-  assert.equal(toggle.props.disabled, false);
-  const stop = buttons[1];
-  assert.equal(stop.props.disabled, true, 'stop is disabled while no game runs');
+  const rendered = overlay.component({});
+  assert.equal(rendered.type, 'div');
+  assert.equal(rendered.props.role, 'group');
+  assert.equal(rendered.props.style.position, 'fixed', 'the panel must float above the app');
+  assert.equal(rendered.props.style.pointerEvents, 'auto', 'the overlay layer is click-through; the panel opts back in');
+  assert.equal(rendered.props.style.cursor, 'grab');
+  assert.equal(typeof rendered.props.onPointerDown, 'function', 'dragging starts on pointer down');
+  assert.equal(typeof rendered.props.onDoubleClick, 'function', 'double-click resets the position');
+  assert.match(rendered.props.title, /moveHint|move/i);
+
+  const buttons = rendered.children.filter((child) => child && child.type === 'button');
+  assert.equal(buttons.length, 2, 'expected a run/pause toggle and a stop button');
+  assert.equal(typeof buttons[0].props.onClick, 'function');
+  assert.equal(buttons[0].props.disabled, false);
+  assert.equal(buttons[1].props.disabled, true, 'stop is disabled while no game runs');
+});
+
+test('the session bridge records the conversation id for the overlay', () => {
+  const { plugin } = loadClientModule();
+  const { ctx, record } = recordingContext();
+  plugin.apply(ctx);
+  const bridge = record.registrations.find((entry) => entry.options.name === 'conversation.session.header.utilities');
+  assert.ok(bridge);
+  // The bridge renders nothing; its effect stores the id when React mounts it.
+  assert.equal(bridge.component({ sessionId: 'session-42' }), null);
 });

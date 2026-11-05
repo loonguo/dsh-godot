@@ -54,10 +54,13 @@ godot_stop {session: "g1"}
 
 可见性规则：
 
-- 客户端每 2.5s 拉一次 `GET /dsh-godot/state?sessionId=…`，Host 在返回里带
+- 客户端每 **1s** 拉一次 `GET /dsh-godot/state?sessionId=…`，Host 在返回里带
   `workspace: { directory, available, project, projectName, candidates }`——
   即"该会话工作目录（含向下两层子目录）里是否存在 `project.godot`"。
   `available === false` 时组件直接 `return null`，浮窗不渲染、不占位；`available` 变真时自动出现。
+- **切换会话时立即刷新**：标题栏桥接条目更新会话 id 的那一刻，模块内的小订阅会立刻触发一次
+  `state` 请求（本机回环约 2–4ms），不用等下一次轮询；过期响应按序号 + 会话 id 丢弃，
+  避免旧会话的结果盖掉新会话。空闲时仍有 1s 轮询兜底（比如刚新建了工程）。
 - 例外：**游戏正在运行时浮窗保持可见**（即使工作区被移走），否则就没法暂停/停止了。
 - 切换会话后浮窗会跟着重新判断（会话 id 由标题栏里的不可见桥接条目提供）。
 - 悬浮层本身是点击穿透的（`shell.overlay` 的约定），卡片自己开启 `pointer-events: auto`，

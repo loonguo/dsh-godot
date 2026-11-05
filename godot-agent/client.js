@@ -26,6 +26,8 @@ window.__ModuleLoader__.load({
     const PANEL_WIDTH = 244;
     const PANEL_HEIGHT = 48;
     const EDGE = 8;
+    /** Background refresh cadence; Session switches refresh immediately instead. */
+    const POLL_INTERVAL_MS = 1000;
 
     const DICTIONARIES = {
       en: {
@@ -58,8 +60,36 @@ window.__ModuleLoader__.load({
 
     const FALLBACK = DICTIONARIES.en;
 
+    /* ---------------------------------------------------------------- session */
+    /* The panel is root-scoped, so a tiny store carries the open Session id and
+     * notifies the panel the instant the user switches conversations — waiting
+     * for the next poll made switching feel slow. */
+
     /** Session id of the conversation the page currently shows; set by the bridge entry. */
     let activeSessionId = null;
+    /** Refresh callbacks waiting for a Session change. */
+    const sessionListeners = new Set();
+
+    function setActiveSessionId(next) {
+      const normalized = typeof next === 'string' && next.length > 0 ? next : null;
+      if (normalized === activeSessionId) return;
+      activeSessionId = normalized;
+      for (const listener of [...sessionListeners]) {
+        try {
+          listener();
+        } catch {
+          /* a listener must not break the others */
+        }
+      }
+    }
+
+    /** Subscribe to Session switches; returns the unsubscriber. */
+    function onActiveSessionChange(listener) {
+      sessionListeners.add(listener);
+      return () => {
+        sessionListeners.delete(listener);
+      };
+    }
 
     function readStoredPosition() {
       try {
@@ -205,7 +235,7 @@ window.__ModuleLoader__.load({
     function SessionBridge(props) {
       const sessionId = props && props.sessionId;
       React.useEffect(() => {
-        activeSessionId = typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : null;
+        setActiveSessionId(sessionId);
       }, [sessionId]);
       return null;
     }
@@ -221,18 +251,29 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         let cancelled = false;
+        let sequence = 0;
         const refresh = async () => {
+          const wanted = activeSessionId;
+          const mine = ++sequence;
           try {
-            const next = await readState(activeSessionId);
-            if (!cancelled) setState(next);
+            const next = await readState(wanted);
+            // Drop a response that a newer request or a Session switch superseded.
+            if (cancelled || mine !== sequence || activeSessionId !== wanted) return;
+            setState(next);
           } catch (failure) {
             if (!cancelled) setError(String((failure && failure.message) || failure));
           }
         };
         refresh();
-        const timer = setInterval(refresh, 2500);
+        const unlisten = onActiveSessionChange(() => {
+          // Switching conversations must not keep the previous session's error.
+          setError('');
+          refresh();
+        });
+        const timer = setInterval(refresh, POLL_INTERVAL_MS);
         return () => {
           cancelled = true;
+          unlisten();
           clearInterval(timer);
         };
       }, []);

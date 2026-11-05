@@ -17,7 +17,7 @@ const PACKAGE_DIR = path.dirname(HERE);
 const packageJson = JSON.parse(fs.readFileSync(path.join(PACKAGE_DIR, 'package.json'), 'utf8'));
 
 /** Load client.js as the page would and return what it registered. */
-function loadClientModule() {
+function loadClientModule(options = {}) {
   const captured = { id: null, factory: null };
   const fakeWindow = {
     __ModuleLoader__: {
@@ -26,8 +26,14 @@ function loadClientModule() {
         captured.factory = definition.factory;
       },
     },
+    // Enough of a browser for effects that run in the immediate-refresh test.
+    innerWidth: 1280,
+    innerHeight: 800,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    localStorage: { getItem: () => null, setItem: () => {} },
   };
-  const React = {
+  const React = options.react ?? {
     createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
     useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
     useEffect: () => {},
@@ -155,4 +161,77 @@ test('the session bridge records the conversation id for the overlay', () => {
   assert.ok(bridge);
   // The bridge renders nothing; its effect stores the id when React mounts it.
   assert.equal(bridge.component({ sessionId: 'session-42' }), null);
+});
+
+test('switching sessions refreshes the panel immediately instead of waiting for the poll', async () => {
+  // A React whose effects run on mount, so the session bridge and the panel's
+  // subscription can be exercised the way the browser mounts them.
+  const cleanups = [];
+  const react = {
+    createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
+    useState: (initial) => [typeof initial === 'function' ? initial() : initial, () => {}],
+    useEffect: (effect) => {
+      const cleanup = effect();
+      if (typeof cleanup === 'function') cleanups.push(cleanup);
+    },
+  };
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  let polls = 0;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    const sessionId = new URL(String(url), 'http://127.0.0.1').searchParams.get('sessionId');
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        state: { running: false, paused: false, workspace: { available: sessionId === 'session-a', projectName: 'Game A' } },
+      }),
+    };
+  };
+  globalThis.setInterval = () => {
+    polls += 1;
+    return polls;
+  };
+  globalThis.clearInterval = () => {};
+
+  try {
+    const { plugin } = loadClientModule({ react });
+    const { ctx, record } = recordingContext();
+    plugin.apply(ctx);
+    const bridge = record.registrations.find((entry) => entry.options.name === 'conversation.session.header.utilities');
+    const overlay = record.registrations.find((entry) => entry.options.name === 'shell.overlay');
+    assert.ok(bridge && overlay);
+
+    // Mount order in the page: the panel first, then the header bridge.
+    overlay.component({});
+    assert.equal(calls.length, 1, 'the panel loads state once on mount');
+    assert.equal(calls[0].includes('sessionId='), false, 'no session is known yet');
+
+    bridge.component({ sessionId: 'session-a' });
+    assert.equal(calls.length, 2, 'a Session switch must trigger an immediate refresh');
+    assert.match(calls[1], /sessionId=session-a/);
+
+    bridge.component({ sessionId: 'session-b' });
+    assert.equal(calls.length, 3, 'each switch refreshes immediately, not on the next poll');
+    assert.match(calls[2], /sessionId=session-b/);
+
+    // Re-rendering the same session must not add traffic.
+    bridge.component({ sessionId: 'session-b' });
+    assert.equal(calls.length, 3, 'an unchanged session does not refresh again');
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+    for (const cleanup of cleanups.reverse()) {
+      try {
+        cleanup();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
 });

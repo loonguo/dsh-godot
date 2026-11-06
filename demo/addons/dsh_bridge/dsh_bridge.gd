@@ -217,6 +217,8 @@ func _handle_line(line: String) -> void:
 			_reply_ok(id, {"pong": true, "scene": _current_scene_path(), "paused": get_tree().paused})
 		"pause":
 			_cmd_pause(id, args)
+		"reload":
+			_cmd_reload(id, args)
 		"tree":
 			_cmd_tree(id, args)
 		"node":
@@ -624,6 +626,23 @@ func _cmd_pause(id: int, args: Dictionary) -> void:
 		return
 	tree.paused = bool(args.get("paused", true))
 	_reply_ok(id, {"paused": tree.paused})
+
+
+## Reload the currently active scene (the toolbar's refresh button).
+## The bridge autoload survives a scene reload, so the connection stays usable.
+func _cmd_reload(id: int, args: Dictionary) -> void:
+	var tree := get_tree()
+	if tree == null:
+		_reply_error(id, "reload failed: no running scene tree")
+		return
+	# A paused tree keeps new gameplay frozen, so a reload always resumes first.
+	tree.paused = false
+	var scene := _current_scene_path()
+	var err := tree.reload_current_scene()
+	if err != OK:
+		_reply_error(id, "reload failed: %s" % error_string(err))
+		return
+	_reply_ok(id, {"reloaded": true, "scene": scene})
 
 
 func _cmd_quit(id: int, args: Dictionary) -> void:

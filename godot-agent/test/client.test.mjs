@@ -103,13 +103,13 @@ test('the floating panel registers in shell.overlay plus a session-id bridge', (
   assert.deepEqual([...locales].sort(), ['en', 'zh']);
   for (const entry of record.locales) {
     assert.equal(entry.ns, 'dsh-godot');
-    for (const key of ['run', 'pause', 'resume', 'stop', 'running', 'paused', 'idle', 'failed', 'moveHint']) {
+    for (const key of ['run', 'pause', 'resume', 'stop', 'reload', 'rerun', 'running', 'paused', 'idle', 'failed', 'moveHint']) {
       assert.equal(typeof entry.dict[key], 'string', `${entry.locale}.${key} must be a string`);
     }
   }
 });
 
-test('the floating panel is fixed-positioned, draggable and keeps the run/stop controls', () => {
+test('the floating panel is fixed-positioned, draggable and keeps the run/reload/stop controls', () => {
   const { plugin, React } = loadClientModule();
   const { ctx, record } = recordingContext();
   plugin.apply(ctx);
@@ -138,19 +138,35 @@ test('the floating panel is fixed-positioned, draggable and keeps the run/stop c
   assert.match(rendered.props.title, /moveHint|move/i);
 
   const buttons = rendered.children.filter((child) => child && child.type === 'button');
-  assert.equal(buttons.length, 2, 'expected a run/pause toggle and a stop button');
+  assert.equal(buttons.length, 3, 'expected run/pause, reload and stop buttons');
+  assert.deepEqual(
+    buttons.map((button) => button.props.key),
+    ['toggle', 'reload', 'stop'],
+  );
   assert.equal(typeof buttons[0].props.onClick, 'function');
   assert.equal(buttons[0].props.disabled, false);
-  assert.equal(buttons[1].props.disabled, true, 'stop is disabled while no game runs');
+  assert.equal(buttons[1].props.disabled, true, 'reload is disabled before anything ran and while idle');
+  assert.equal(buttons[2].props.disabled, true, 'stop is disabled while no game runs');
+
+  // The refresh button re-runs the last project once the Host remembers one.
+  const withLastRun = overlay.component({
+    initialState: { running: false, workspace: { available: true }, lastRun: { project: 'D:/game', projectName: 'Last Game' } },
+  });
+  const idleButtons = withLastRun.children.filter((child) => child && child.type === 'button');
+  assert.equal(idleButtons[1].props.disabled, false, 'reload re-runs the last project when one exists');
+  assert.match(idleButtons[1].props.title, /rerun/, 'idle reload title comes from the rerun label');
+
+  // While running it reloads the current scene and pauses are cleared by the Host.
+  const running = overlay.component({ initialState: { running: true, paused: true, workspace: { available: false } } });
+  assert.equal(running.type, 'div');
+  const runningButtons = running.children.filter((child) => child && child.type === 'button');
+  assert.equal(runningButtons[1].props.disabled, false, 'reload is available while a game runs');
+  assert.match(runningButtons[1].props.title, /reload/, 'running reload title comes from the reload label');
 
   // An idle panel names the workspace project so the run button is self-explanatory.
   const label = rendered.children.find((child) => child && child.type === 'span' && child.props.style && child.props.style.overflow === 'hidden');
   assert.ok(label, 'expected a status label');
   assert.match(String(label.children[0]), /Star Catcher/);
-
-  // A running game keeps the panel visible even if the workspace check fails.
-  const running = overlay.component({ initialState: { running: true, workspace: { available: false } } });
-  assert.equal(running.type, 'div');
 });
 
 test('the session bridge records the conversation id for the overlay', () => {

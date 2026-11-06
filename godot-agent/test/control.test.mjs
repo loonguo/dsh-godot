@@ -99,15 +99,47 @@ test('controller starts, pauses, resumes and stops a real game', { skip, timeout
     const toggledToResume = await withTimeout(controller.act('toggle'), 8000, 'toggle -> resume');
     assert.equal(toggledToResume.paused, false);
 
+    // Refresh button while running: reload the current scene in place.
+    const beforeReload = await debugTicks(session, bridge);
+    const reloaded = await withTimeout(controller.act('reload'), 10000, 'reload running scene');
+    assert.equal(reloaded.running, true);
+    await wait(250);
+    const afterReload = await debugTicks(session, bridge);
+    assert.ok(afterReload < beforeReload, `reloading the scene restarts gameplay (${beforeReload} -> ${afterReload})`);
+    assert.equal(session.alive, true, 'reload keeps the process and the bridge alive');
+
+    // A paused game must come back running after a reload.
+    const pausedAgain = await controller.pause();
+    assert.equal(pausedAgain.paused, true);
+    const reloadedFromPause = await withTimeout(controller.act('reload'), 10000, 'reload while paused');
+    assert.equal(reloadedFromPause.paused, false, 'a reload resumes a paused game');
+
     const stopped = await controller.stop();
     assert.equal(stopped.running, false);
+    assert.ok(stopped.lastRun, 'the Host remembers the last project for the refresh button');
     await wait(300);
     assert.equal(session.alive, false, 'stop must end the Godot process');
     assert.equal(runtime.sessions.list().length, 0, 'the session registry must be empty');
+
+    // Refresh button while idle: run the last project again.
+    const restarted = await withTimeout(controller.act('reload'), 30000, 're-run the last project');
+    assert.equal(restarted.running, true);
+    assert.equal(path.resolve(restarted.project), path.resolve(directory));
+    assert.equal(restarted.paused, false);
+    await withTimeout(controller.stop(), 10000, 'stop the re-run');
+    await wait(600);
   } finally {
     controller.dispose();
     runtime.dispose();
-    fs.rmSync(directory, { recursive: true, force: true });
+    // Windows can hold the project directory briefly after the engine exits.
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        fs.rmSync(directory, { recursive: true, force: true });
+        break;
+      } catch {
+        await wait(250);
+      }
+    }
   }
 });
 
@@ -149,6 +181,7 @@ test('controller rejects actions without a running game', { skip, timeout: 30000
   const controller = createController(runtime, {});
   try {
     await assert.rejects(() => controller.pause(), /no game is running/);
+    await assert.rejects(() => controller.act('reload'), /nothing to reload yet/);
     await assert.rejects(() => controller.act('explode'), /unknown action/);
     assert.equal(controller.state().running, false);
   } finally {

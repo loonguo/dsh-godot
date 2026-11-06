@@ -91,6 +91,8 @@ export function findProjects(root) {
 export function createController(runtime, { resolveSessionDirectory } = {}) {
   /** @type {{ session: object, bridge: BridgeServer, projectDir: string, projectName: string, startedAt: number, paused: boolean } | null} */
   let current = null;
+  /** Last project started in this Host run — what the refresh button re-runs. */
+  let lastRun = null;
   /** Serializes start/stop/pause so double clicks cannot spawn twice. */
   let chain = Promise.resolve();
 
@@ -157,6 +159,7 @@ export function createController(runtime, { resolveSessionDirectory } = {}) {
    */
   function state(sessionId) {
     const workspace = sessionWorkspace(sessionId);
+    const lastRunInfo = lastRun === null ? null : { project: lastRun.project, projectName: lastRun.projectName };
     if (current === null) {
       return {
         running: false,
@@ -168,6 +171,7 @@ export function createController(runtime, { resolveSessionDirectory } = {}) {
         startedAt: null,
         bridge: null,
         workspace,
+        lastRun: lastRunInfo,
       };
     }
     const alive = current.session.alive !== false;
@@ -181,6 +185,7 @@ export function createController(runtime, { resolveSessionDirectory } = {}) {
       startedAt: current.startedAt,
       bridge: current.bridge.attached ? 'attached' : 'detached',
       workspace,
+      lastRun: lastRunInfo,
     };
   }
 
@@ -315,6 +320,7 @@ export function createController(runtime, { resolveSessionDirectory } = {}) {
         );
       }
 
+      lastRun = { project: directory, projectName: name };
       current = {
         session,
         bridge,
@@ -364,8 +370,31 @@ export function createController(runtime, { resolveSessionDirectory } = {}) {
   const stop = () => serialize(() => stopInternal());
 
   /**
+   * The floating toolbar's refresh button: reload the running game's current
+   * scene in place, or — when no game is running — run the last project again.
+   * @param {{ project?: string, sessionId?: string }} [options]
+   */
+  async function reloadInternal(options = {}) {
+    if (current !== null && current.session.alive !== false) {
+      if (!current.bridge.attached) {
+        throw new Error('the running game is not attached to the control bridge; stop it and start again.');
+      }
+      // The scene reload resumes a paused tree; mirror that in the tracked state.
+      current.paused = false;
+      const reply = await current.bridge.request('reload', {});
+      if (reply.ok !== true) throw new Error(reply.error ?? 'the game refused the reload command');
+      current.paused = false;
+      return state();
+    }
+    if (lastRun === null) throw new Error('nothing to reload yet: run the game once first.');
+    return startInternal({ ...options, project: lastRun.project });
+  }
+
+  const reload = (options = {}) => serialize(() => reloadInternal(options));
+
+  /**
    * One HTTP/agent-facing entry point.
-   * @param {'start'|'pause'|'resume'|'toggle'|'stop'|'status'} action
+   * @param {'start'|'pause'|'resume'|'toggle'|'reload'|'stop'|'status'} action
    * @param {{ project?: string, sessionId?: string }} [options]
    */
   function act(action, options = {}) {
@@ -381,6 +410,8 @@ export function createController(runtime, { resolveSessionDirectory } = {}) {
           if (current === null || current.session.alive === false) return startInternal(options);
           return setPausedInternal(!current.paused);
         });
+      case 'reload':
+        return reload(options);
       case 'stop':
         return stop();
       case 'status':
@@ -402,7 +433,7 @@ export function createController(runtime, { resolveSessionDirectory } = {}) {
     }
   }
 
-  return { state, act, start, pause: () => setPaused(true), resume: () => setPaused(false), stop, dispose };
+  return { state, act, start, pause: () => setPaused(true), resume: () => setPaused(false), reload, stop, dispose };
 }
 
 /* ------------------------------------------------------------------ http */

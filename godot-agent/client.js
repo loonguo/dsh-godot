@@ -35,6 +35,8 @@ window.__ModuleLoader__.load({
         pause: 'Pause game',
         resume: 'Resume game',
         stop: 'Stop game',
+        reload: 'Reload current scene',
+        rerun: 'Run the last game again',
         running: 'Running',
         paused: 'Paused',
         idle: 'Not running',
@@ -48,6 +50,8 @@ window.__ModuleLoader__.load({
         pause: '暂停游戏',
         resume: '继续游戏',
         stop: '停止游戏',
+        reload: '重新加载当前场景',
+        rerun: '重新运行上次的游戏',
         running: '运行中',
         paused: '已暂停',
         idle: '未运行',
@@ -205,6 +209,22 @@ window.__ModuleLoader__.load({
       );
     }
 
+    /** Circular arrow: reload the running scene / re-run the last game. */
+    function IconReload() {
+      return h(
+        'svg',
+        { viewBox: '0 0 16 16', width: 12, height: 12, 'aria-hidden': true, focusable: false },
+        h('path', {
+          d: 'M13.2 8a5.2 5.2 0 1 1-1.6-3.75',
+          fill: 'none',
+          stroke: 'currentColor',
+          'stroke-width': 1.8,
+          'stroke-linecap': 'round',
+        }),
+        h('path', { d: 'M12.4 1.9v3.1H9.3', fill: 'none', stroke: 'currentColor', 'stroke-width': 1.8, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }),
+      );
+    }
+
     function IconGrip() {
       return h(
         'svg',
@@ -336,7 +356,15 @@ window.__ModuleLoader__.load({
         setBusy(true);
         try {
           const next = await sendControl({ action, sessionId: activeSessionId || undefined });
-          setState(next);
+          // The control reply omits the caller's workspace context, so refresh the
+          // panel state once more; otherwise a Stop would hide the panel for a poll.
+          let merged = next;
+          try {
+            merged = await readState(activeSessionId);
+          } catch {
+            /* keep the action result when the follow-up read fails */
+          }
+          setState(merged);
           setError('');
         } catch (failure) {
           setError(String((failure && failure.message) || failure));
@@ -355,6 +383,11 @@ window.__ModuleLoader__.load({
       if (!available) return null;
       const toggleTitle = busy ? translate('busy') : !running ? translate('run') : paused ? translate('resume') : translate('pause');
       const statusText = busy ? translate('busy') : !running ? translate('idle') : paused ? translate('paused') : translate('running');
+      // The refresh button reloads the running scene, or re-runs the last project
+      // once the Host remembers one (state.lastRun).
+      const lastRun = state && state.lastRun ? state.lastRun : null;
+      const canReload = Boolean(running || lastRun);
+      const reloadTitle = busy ? translate('busy') : running ? translate('reload') : translate('rerun');
       const projectText = state && state.project ? state.projectName || state.project : workspace && workspace.projectName ? workspace.projectName : '';
       const detail = [statusText, projectText].filter((part) => part !== '').join(' · ');
       const tooltip = error
@@ -451,6 +484,19 @@ window.__ModuleLoader__.load({
             style: buttonStyle('var(--dsw-alias-brand-primary)', busy),
           },
           running && !paused ? h(IconPause) : h(IconPlay),
+        ),
+        h(
+          'button',
+          {
+            key: 'reload',
+            type: 'button',
+            title: reloadTitle,
+            'aria-label': reloadTitle,
+            disabled: busy || !canReload,
+            onClick: () => act('reload'),
+            style: buttonStyle('var(--dsw-alias-label-secondary)', busy || !canReload),
+          },
+          h(IconReload),
         ),
         h(
           'button',

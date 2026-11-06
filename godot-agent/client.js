@@ -142,15 +142,21 @@ window.__ModuleLoader__.load({
      */
     function createTranslator(ctx) {
       const locale = typeof ctx.get === 'function' ? ctx.get('locale') : undefined;
-      try {
-        if (locale && typeof locale.register === 'function' && typeof locale.bind === 'function') {
+      if (locale && typeof locale.bind === 'function') {
+        if (typeof locale.register === 'function') {
           for (const [localeId, dict] of Object.entries(DICTIONARIES)) {
-            locale.register(NS, localeId, dict);
+            try {
+              locale.register(NS, localeId, dict);
+            } catch {
+              /* an earlier instance of this module (HMR) already registered the namespace */
+            }
           }
-          return locale.bind(NS);
         }
-      } catch {
-        /* fall through to the English table */
+        try {
+          return locale.bind(NS);
+        } catch {
+          /* fall through to the English table */
+        }
       }
       return (key) => FALLBACK[key] ?? key;
     }

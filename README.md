@@ -76,7 +76,16 @@ godot_stop {session: "g1"}
 - 传输是本机回环 HTTP：`GET /dsh-godot/state?sessionId=…`、`POST /dsh-godot/control`（JSON，
   `action: start|pause|resume|toggle|stop`）。路由只接受同源请求，且服务绑定在 127.0.0.1；
   本机其它进程仍可访问，因此它只用于本机受信环境。
+- **启动顺序（曾导致"每次重启 DSH 浮窗消失"的根因）**：插件行可能在 Host 的 Web 载体
+  （`webServer`）开始监听之前就被激活。之前把 `webServer` / `agents` / `workingDirectory`
+  在 apply 时缓存下来，结果是：重启后路由从未注册（`/dsh-godot/state` 404）、会话目录也永远解析
+  不到 → 浮窗一直隐藏，只有手动重启插件（重新加载）才恢复。现在改为：
+  - 路由通过 `ctx.inject(['webServer'])` 等待服务就绪，并额外用 250ms 的有限轮询兜底（最多 20s，
+    结束会 dispose）；拿到载体后才注册两个路由；
+  - `agents` / `workingDirectory` 不再缓存，每次请求时通过 `ctx.get()` 现取。
+  这样重启 DSH 后浮窗会自动出现，不需要重启插件。
 - 客户端代码（`client.js`）由页面在加载时拉取：**更新插件后需要刷新一次页面**才会出现/更新悬浮卡片。
+- 语言字典按命名空间注册；HMR 重载同一模块时重复注册会被忽略而不是退化到英文。
 
 ## 2. 真实会话实录（全部发生在本会话，非模拟）
 

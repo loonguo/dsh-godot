@@ -222,6 +222,13 @@ test('switching sessions refreshes the panel immediately instead of waiting for 
     // Re-rendering the same session must not add traffic.
     bridge.component({ sessionId: 'session-b' });
     assert.equal(calls.length, 3, 'an unchanged session does not refresh again');
+
+    // Unmounting the header (Plugins/Settings/New Session: no conversation open)
+    // must clear the Session, otherwise the panel keeps a stale workspace answer.
+    const beforeUnmount = calls.length;
+    cleanups[cleanups.length - 1]();
+    assert.equal(calls.length, beforeUnmount + 1, 'unmounting the session header triggers a refresh');
+    assert.equal(calls.at(-1).includes('sessionId='), false, 'no conversation means no workspace decision');
   } finally {
     globalThis.fetch = originalFetch;
     globalThis.setInterval = originalSetInterval;

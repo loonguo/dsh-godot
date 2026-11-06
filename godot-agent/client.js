@@ -237,11 +237,20 @@ window.__ModuleLoader__.load({
       };
     }
 
-    /** Invisible entry in the Session header: records which conversation is open. */
+    /**
+     * Invisible entry in the Session header: records which conversation is open.
+     * Unmounting clears it, so pages without a conversation (Plugins, Settings,
+     * the New Session screen) hide the panel instead of keeping the last
+     * session's workspace decision.
+     */
     function SessionBridge(props) {
       const sessionId = props && props.sessionId;
       React.useEffect(() => {
-        setActiveSessionId(sessionId);
+        const normalized = typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : null;
+        setActiveSessionId(normalized);
+        return () => {
+          if (activeSessionId === normalized) setActiveSessionId(null);
+        };
       }, [sessionId]);
       return null;
     }
